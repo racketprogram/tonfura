@@ -51,9 +51,6 @@ func TestIntegration(t *testing.T) {
 
 	var wg sync.WaitGroup
 
-	// Initialize a counter to track successful appointments
-	successCounter := 0
-
 	// Step 1: Concurrently test /appointment endpoint for numUsers users
 	for i := 1; i <= numUsers; i++ {
 		userID := i
@@ -70,9 +67,6 @@ func TestIntegration(t *testing.T) {
 			t.Errorf("Expected status %d for user %d but got %d. Response body: %s", http.StatusOK, userID, resp.StatusCode, string(body))
 			return
 		}
-
-		// Increase the success counter if the appointment was successful
-		successCounter++
 
 		var respBody map[string]interface{}
 		err = json.NewDecoder(resp.Body).Decode(&respBody)
