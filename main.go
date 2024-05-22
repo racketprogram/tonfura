@@ -2,9 +2,12 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"log"
+	"runtime"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -16,11 +19,24 @@ var (
 	rdb            *redis.Client
 	writer         *kafka.Writer
 	appointmentSet map[int]struct{}
-	bookSet        map[int]struct{}
+	bookSet        sync.Map // Use sync.Map for thread-safe operations
 	canBook        bool
+	startHour      int
+	startMinute    int
 )
 
 func main() {
+	// Use all available CPU cores
+	runtime.GOMAXPROCS(runtime.NumCPU())
+
+	// Set Gin to release mode
+	gin.SetMode(gin.ReleaseMode)
+
+	// Parse command line arguments
+	flag.IntVar(&startHour, "hour", 23, "hour to start booking")
+	flag.IntVar(&startMinute, "minute", 0, "minute to start booking")
+	flag.Parse()
+
 	ctx := context.Background()
 	defer ctx.Done()
 
@@ -32,10 +48,10 @@ func main() {
 	defer writer.Close()
 
 	appointmentSet = make(map[int]struct{})
-	bookSet = make(map[int]struct{})
 	canBook = false
 
-	r := gin.Default()
+	r := gin.New()
+	r.Use(gin.Recovery())
 
 	r.POST("/appointment", handleAppointment)
 	r.POST("/book_coupon", handleBookCoupon)
@@ -70,7 +86,16 @@ func initKafkaWriter() {
 }
 
 func handleAppointment(c *gin.Context) {
-	userID, err := getUserIDFromContext(c)
+	now := time.Now()
+	startTime := time.Date(now.Year(), now.Month(), now.Day(), startHour, startMinute, 0, 0, now.Location())
+
+	// Check if the current time is within the 5 minutes before the start time
+	if now.Before(startTime.Add(-5*time.Minute)) || now.After(startTime) {
+		c.JSON(400, gin.H{"error": "appointments can only be made within 5 minutes before start time"})
+		return
+	}
+
+	userID, err := getUserID(c)
 	if err != nil {
 		c.JSON(400, gin.H{"error": err.Error()})
 		return
@@ -85,12 +110,21 @@ func handleAppointment(c *gin.Context) {
 }
 
 func handleBookCoupon(c *gin.Context) {
+	now := time.Now()
+	startTime := time.Date(now.Year(), now.Month(), now.Day(), startHour, startMinute, 0, 0, now.Location())
+
+	// Check if the current time is within the 1 minute after the start time
+	if now.Before(startTime) || now.After(startTime.Add(1*time.Minute)) {
+		c.JSON(400, gin.H{"error": "coupons can only be booked within 1 minute after start time"})
+		return
+	}
+
 	if !canBook {
 		c.JSON(500, gin.H{"error": "coupon booking time has not started yet"})
 		return
 	}
 
-	userID, err := getUserIDFromContext(c)
+	userID, err := getUserID(c)
 	if err != nil {
 		c.JSON(400, gin.H{"error": err.Error()})
 		return
@@ -109,23 +143,25 @@ func handleBookCoupon(c *gin.Context) {
 	c.JSON(200, gin.H{"message": "coupon booked successfully"})
 }
 
-// Helper functions
-func getUserIDFromContext(c *gin.Context) (int, error) {
-	a, exists := c.Get("userID")
-	if !exists {
-		return 0, fmt.Errorf("user ID not found in JWT")
+// Helper function to get userID from request body
+func getUserID(c *gin.Context) (int, error) {
+	var reqBody struct {
+		UserID int `json:"userID"`
+	}
+	if err := c.ShouldBindJSON(&reqBody); err != nil {
+		return 0, fmt.Errorf("invalid request body")
 	}
 
-	userID, ok := a.(int)
-	if !ok {
-		return 0, fmt.Errorf("user ID is not an integer")
+	if reqBody.UserID == 0 {
+		return 0, fmt.Errorf("user ID is not present in the request body")
 	}
-	return userID, nil
+
+	return reqBody.UserID, nil
 }
 
 func isUserEligibleForCoupon(userID int) bool {
 	_, existsInAppointments := appointmentSet[userID]
-	_, existsInBookSet := bookSet[userID]
+	_, existsInBookSet := bookSet.Load(userID)
 	return existsInAppointments && !existsInBookSet
 }
 
@@ -148,14 +184,16 @@ func bookCouponForUser(ctx context.Context, userID int) error {
 		return fmt.Errorf("failed to write message to Kafka: %v", err)
 	}
 
-	bookSet[userID] = struct{}{}
+	bookSet.Store(userID, struct{}{})
 	return nil
 }
 
 func setAppointment(ctx context.Context) {
 	for {
 		now := time.Now()
-		if now.Hour() == 23 && now.Minute() == 0 {
+		if now.Hour() >= startHour && now.Minute() >= startMinute {
+			log.Println("start to setAppointment")
+
 			userIDs, err := rdb.SMembers(ctx, "appointments").Result()
 			if err != nil {
 				log.Println("failed to get user IDs from appointments set:", err)
@@ -174,14 +212,16 @@ func setAppointment(ctx context.Context) {
 			canBook = true
 			return
 		}
-		time.Sleep(time.Minute)
+		time.Sleep(time.Second)
 	}
 }
 
 func setAvailable(ctx context.Context) {
 	for {
 		now := time.Now()
-		if now.Hour() == 23 && now.Minute() == 0 {
+		if now.Hour() >= startHour && now.Minute() >= startMinute {
+			log.Println("start to setAvailable")
+
 			userIDs, err := rdb.SMembers(ctx, "appointments").Result()
 			if err != nil {
 				log.Println("failed to get user IDs from appointments set:", err)
@@ -189,9 +229,9 @@ func setAvailable(ctx context.Context) {
 			}
 
 			size := len(userIDs)
-			log.Println("setAvailable:", size)
-
 			available := size / 5
+			log.Println("setAvailable:", available)
+
 			if err := rdb.Set(ctx, "available", available, 0).Err(); err != nil {
 				log.Println("failed to save set size:", err)
 			} else {
@@ -199,7 +239,7 @@ func setAvailable(ctx context.Context) {
 				return
 			}
 		}
-		time.Sleep(time.Minute)
+		time.Sleep(time.Second)
 	}
 }
 
@@ -213,6 +253,8 @@ func consumeKafkaMessages(ctx context.Context) {
 	})
 	defer reader.Close()
 
+	count := 0
+
 	for {
 		msg, err := reader.FetchMessage(ctx)
 		if err != nil {
@@ -222,13 +264,17 @@ func consumeKafkaMessages(ctx context.Context) {
 
 		userID := string(msg.Key)
 		if exists, err := rdb.SIsMember(ctx, "appointments", userID).Result(); err == nil && exists {
-			// TODO: Additional logic for handling consumed messages
+			// TODO:
 		}
 
 		if err := reader.CommitMessages(ctx, msg); err != nil {
-			log.Println("failed to commit message:", err)
+			// log.Println("failed to commit message:", err)
 		} else {
-			log.Printf("received message: key=%s, value=%s\n", userID, string(msg.Value))
+			count++
+			// log.Printf("received message: key=%s, value=%s\n", userID, string(msg.Value))
+		}
+		if count%1000 == 0 {
+			log.Printf("kafka already consumed %d message", count)
 		}
 	}
 }

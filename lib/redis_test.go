@@ -11,14 +11,14 @@ import (
 
 var ctx = context.Background()
 
-func TestRedisReadWrite(t *testing.T) {
-	// 創建一個 Redis 連接
+func TestRedis(t *testing.T) {
+	// Create a Redis connection
 	rdb := redis.NewClient(&redis.Options{
-		Addr: "localhost:6379", // Redis 服務器地址
-		DB:   0,                // 使用默認的數據庫
+		Addr:        "localhost:6379", // Redis server address
+		DB:          0,                // Use default database
 	})
 
-	// 清空 Redis 中的所有數據
+	// Flush all data in Redis
 	err := rdb.FlushAll(ctx).Err()
 	if err != nil {
 		fmt.Println("Failed to flush Redis:", err)
@@ -49,7 +49,7 @@ func TestRedisReadWrite(t *testing.T) {
 		t.Fail()
 	}
 
-	// 測試讀取 Redis
+	// Test reading from Redis
 	val, err := rdb.Get(ctx, "available").Int()
 	if err != nil {
 		t.Errorf("Failed to get value from Redis: %v", err)
@@ -57,28 +57,28 @@ func TestRedisReadWrite(t *testing.T) {
 
 	fmt.Println(val)
 
-	// 驗證讀取的值是否正確
+	// Verify that the read value is correct
 	if val != available {
-		t.Errorf("Expected value 'test_value', got '%d'", val)
+		t.Errorf("Expected value '%d', got '%d'", available, val)
 	}
 
-	// 設置並發數量
+	// Set concurrency number
 	numThreads := 10
-	// 設置每個 Goroutine 的 DECR 數量
+	// Set the amount to decrement for each Goroutine
 	decrementAmount := 1
-	// 設置預期結果
+	// Set the expected result
 	expectedValue := val - (numThreads * decrementAmount)
 
-	// 創建一個 WaitGroup，用於等待所有 Goroutine 完成
+	// Create a WaitGroup to wait for all Goroutines to complete
 	var wg sync.WaitGroup
 	wg.Add(numThreads)
 
-	// 启动 numThreads 个 Goroutine 进行并发 DECR 操作
+	// Launch numThreads Goroutines to perform concurrent DECR operations
 	for i := 0; i < numThreads; i++ {
 		go func() {
 			defer wg.Done()
-			// 每个 Goroutine 执行 DECR 操作
-			// 執行 DECRBY 操作並獲取結果
+			// Each Goroutine performs a DECR operation
+			// Perform DECRBY operation and get the result
 			newValue, err := rdb.DecrBy(ctx, "available", int64(decrementAmount)).Result()
 			if err != nil {
 				t.Errorf("Failed to decrement value: %v", err)
@@ -89,10 +89,10 @@ func TestRedisReadWrite(t *testing.T) {
 		}()
 	}
 
-	// 等待所有 Goroutine 完成
+	// Wait for all Goroutines to complete
 	wg.Wait()
 
-	// 檢查最終的值是否與預期相同
+	// Check if the final value matches the expected value
 	finalValue, err := rdb.Get(ctx, "available").Int()
 	if err != nil {
 		t.Errorf("Failed to get final value from Redis: %v", err)
