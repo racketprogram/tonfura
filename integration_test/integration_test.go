@@ -100,6 +100,7 @@ func TestIntegration(t *testing.T) {
 		time.Sleep(1 * time.Second)
 	}
 
+	var connected int32
 	var success int32
 
 	// Step 3: Concurrently test /book_coupon endpoint for the same numUsers users
@@ -115,6 +116,7 @@ func TestIntegration(t *testing.T) {
 				t.Errorf("Failed to send POST request for user %d: %v", userID, err)
 				return
 			}
+			atomic.AddInt32(&connected, 1)
 			if resp.StatusCode != http.StatusOK {
 				body, _ := ioutil.ReadAll(resp.Body)
 				t.Errorf("Expected status %d for user %d but got %d. Response body: %s", http.StatusOK, userID, resp.StatusCode, string(body))
@@ -135,5 +137,6 @@ func TestIntegration(t *testing.T) {
 	}
 
 	wg.Wait()
+	t.Logf("%d users connected to server", connected)
 	t.Logf("%d users got the coupon", success)
 }
