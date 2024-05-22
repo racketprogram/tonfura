@@ -9,6 +9,7 @@ import (
 	"os"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -99,7 +100,7 @@ func TestIntegration(t *testing.T) {
 		time.Sleep(1 * time.Second)
 	}
 
-	success := 0
+	var success int32
 
 	// Step 3: Concurrently test /book_coupon endpoint for the same numUsers users
 	for i := 1; i <= numUsers; i++ {
@@ -118,9 +119,6 @@ func TestIntegration(t *testing.T) {
 				body, _ := ioutil.ReadAll(resp.Body)
 				t.Errorf("Expected status %d for user %d but got %d. Response body: %s", http.StatusOK, userID, resp.StatusCode, string(body))
 				return
-			} else {
-				t.Errorf("User %d Success to book coupon", userID)
-				success++
 			}
 
 			var respBody map[string]interface{}
@@ -129,7 +127,10 @@ func TestIntegration(t *testing.T) {
 				t.Errorf("Failed to decode response body for user %d: %v", userID, err)
 				return
 			}
+
 			assert.Equal(t, "coupon booked successfully", respBody["message"])
+			t.Errorf("User %d Success to book coupon", userID)
+			atomic.AddInt32(&success, 1)
 		}(i)
 	}
 

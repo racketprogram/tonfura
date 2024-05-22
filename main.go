@@ -23,6 +23,8 @@ var (
 	canBook        bool
 	startHour      int
 	startMinute    int
+	isLead bool
+	isConsumer bool
 )
 
 func main() {
@@ -35,6 +37,8 @@ func main() {
 	// Parse command line arguments
 	flag.IntVar(&startHour, "hour", 23, "hour to start booking")
 	flag.IntVar(&startMinute, "minute", 0, "minute to start booking")
+	flag.BoolVar(&isLead, "lead", false, "is lead")
+	flag.BoolVar(&isConsumer, "consumer", false, "is consumer")
 	flag.Parse()
 
 	ctx := context.Background()
@@ -56,9 +60,15 @@ func main() {
 	r.POST("/appointment", handleAppointment)
 	r.POST("/book_coupon", handleBookCoupon)
 
-	go setAvailable(ctx)
 	go setAppointment(ctx)
-	go consumeKafkaMessages(ctx)
+	
+	if isLead {
+		go setAvailable(ctx)
+	}
+
+	if isConsumer {
+		go consumeKafkaMessages(ctx)
+	}
 
 	r.Run(":8080")
 }
