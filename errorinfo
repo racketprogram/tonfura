@@ -1,5 +1,5 @@
-TCP 埠耗盡
-An operation on a socket could not be performed because the system lacked sufficient buffer space or because a queue was full.
-
 未知原因，可能跟防火牆有關
 No connection could be made because the target machine actively refused it.
+
+TCP 埠耗盡(只要測試數量小於 65535 - 1024 應該都夠用)
+An operation on a socket could not be performed because the system lacked sufficient buffer space or because a queue was full.

@@ -1,6 +1,4 @@
 const axios = require('axios');
-const { performance } = require('perf_hooks');
-const assert = require('assert');
 
 const sendPostRequest = async (url, body) => {
     try {
@@ -28,22 +26,19 @@ const runTest = async () => {
     let successCount = 0;
     let failCount = 0;
 
-    // Step 1: Concurrently test /appointment endpoint for numUsers users
-    const appointmentPromises = Array.from({ length: numUsers }, (_, i) => {
+    for (let i = 0; i < numUsers; i++) {
         const userID = i + 1;
-        return sendPostRequest(`${baseURL}/appointment`, { userID });
-    });
-
-    const appointmentResponses = await Promise.all(appointmentPromises);
-
-    appointmentResponses.forEach((response, i) => {
-        const userID = i + 1;
-        if (response && response.status === 200 && response.data.message === 'appointment scheduled successfully') {
-            successCount++;
-        } else {
+        try {
+            const response = await sendPostRequest(`${baseURL}/appointment`, { userID });
+            if (response && response.status === 200 && response.data.message === 'appointment scheduled successfully') {
+                successCount++;
+            } else {
+                failCount++;
+            }
+        } catch (error) {
             failCount++;
         }
-    });
+    }
 
     console.log(`Appointments - Success: ${successCount}, Fail: ${failCount}`);
 
