@@ -44,9 +44,9 @@ func main() {
 
 	now := time.Now()
 	startTime = time.Date(now.Year(), now.Month(), now.Day(), startHour, startMinute, 0, 0, now.Location())
-
-	ctx := context.Background()
-	defer ctx.Done()
+	
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	// Initialize Redis
 	initRedis(ctx)
